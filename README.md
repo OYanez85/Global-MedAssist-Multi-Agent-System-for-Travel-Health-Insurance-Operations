@@ -70,6 +70,25 @@ All via a **multi-agent conversational architecture** replacing human operations
 
 ---
 
+## 📚 Reference Material
+
+This project is built upon the concepts, agent patterns, and code examples from the **5-Day Generative AI Intensive by Google DeepMind & Kaggle**.
+
+You can find all related notebooks (Units 1–6) and whitepapers (Prompt Engineering, AgentOps, RAG, LangChain, Vertex AI) in this public GitHub repository:
+
+🔗 [5-Day_Gen_AI_Intensive_by_Kaggle_and_Google_Deep_Mind_2025](https://github.com/OYanez85/5-Day_Gen_AI_Intensive_by_Kaggle_and_Goggle_Deep_Mind_2025)
+
+---
+
+## 🧪 Sample Simulation Scenarios
+
+- 🧓 Elderly woman with knee fracture in France → wheelchair + nurse escort
+- 🌴 Teen with dengue in rural Vietnam → inpatient + evacuation
+- 🛬 Elderly man with cardiac history collapses in Dubai airport → air ambulance + oxygen support
+- 🕵️‍♀️ Traveler assaulted in South Africa → medical + legal + embassy support
+
+---
+
 ## 💬 Try It Now
 
 - 🔗 [**Launch on Kaggle**](#)
