@@ -150,6 +150,7 @@ def generate_pdf_from_log(log_lines, pdf_path):
 # Simulation
 # ----------------------------
 def run_simulation_ui(patient_name):
+    print(f"🚀 run_simulation_ui called with: {patient_name}")
     patient = get_patient_by_name(patient_name)
     if not patient: return "❌ Patient not found.", None, None
     if log_file.exists(): log_file.unlink()
@@ -199,7 +200,8 @@ def launch_ui():
         ],
         title="🧠 Global MedAssist – AI Agent Simulation",
         description="Multi-agent healthcare scenario with PDF + MP3 export, emotional TTS, and RAG."
-    ).launch(share=True)
+    ).launch(share=False, server_name="0.0.0.0", server_port=7860)
 
 # Launch
 launch_ui()
+
