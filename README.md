@@ -1,3 +1,14 @@
+---
+title: Global MedAssist
+emoji: 🧠
+colorFrom: indigo
+colorTo: green
+sdk: gradio
+sdk_version: 4.13.0
+app_file: app.py
+pinned: false
+license: mit
+---
 # 🧠 Capstone Project: Multi-Agent System for Travel Health Insurance Operations
 
 Welcome to the repository for my AI-powered Capstone Project built using **Gemini models**, **LangChain/CrewAI**, and enhanced with insights from **Google Cloud’s Generative AI Whitepapers** and **Kaggle multi-agent competition frameworks**.
