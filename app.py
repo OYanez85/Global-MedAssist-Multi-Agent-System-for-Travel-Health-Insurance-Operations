@@ -5,8 +5,8 @@ from pydub import AudioSegment
 from google.cloud import texttospeech
 from langgraph.graph import StateGraph
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.vectorstores import FAISS
-from langchain.document_loaders import TextLoader
+from langchain_community.vectorstores import FAISS
+from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains import RetrievalQA
 from reportlab.lib.pagesizes import letter
@@ -42,11 +42,11 @@ agent_emotions = {
 }
 
 # ----------------------------
-# Environment setup
+# Environment setup (HF-compatible paths)
 # ----------------------------
-audio_dir = Path("/kaggle/working/tts_audio"); audio_dir.mkdir(exist_ok=True, parents=True)
-log_file = Path("/kaggle/working/case_log.txt")
-zip_output = Path("/kaggle/working/case_export.zip")
+audio_dir = Path("tts_audio"); audio_dir.mkdir(exist_ok=True, parents=True)
+log_file = Path("case_log.txt")
+zip_output = Path("case_export.zip")
 ambient_map = {"hospital": "ambient_hospital.mp3", "airport": "ambient_airport.mp3"}
 
 # TTS
