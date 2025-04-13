@@ -7,13 +7,15 @@ sdk: gradio
 sdk_version: 5.25.0
 app_file: app.py
 pinned: false
-license: mit
 ---
 
 # 🧠 Capstone Project: Multi-Agent System for Travel Health Insurance Operations
+<<<<<<< HEAD
 ...
 
 # 🧠 Capstone Project: Multi-Agent System for Travel Health Insurance Operations
+=======
+>>>>>>> e407f9fa7269228f99f19aa85a3e2283b51b3e6f
 
 Welcome to the repository for my AI-powered Capstone Project built using **Gemini models**, **LangChain/CrewAI**, and enhanced with insights from **Google Cloud’s Generative AI Whitepapers** and **Kaggle multi-agent competition frameworks**.
 
@@ -120,4 +122,8 @@ Data Scientist | Python Developer | Healthcare AI Enthusiast
 📧 Email • 🐦 Twitter • 🌍 LinkedIn
 📝 License
 
+<<<<<<< HEAD
 # MIT License. Feel free to reuse or extend this for educational or experimental purposes.
+=======
+# MIT License. Feel free to reuse or extend this for educational or experimental purposes.
+>>>>>>> e407f9fa7269228f99f19aa85a3e2283b51b3e6f

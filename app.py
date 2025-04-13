@@ -200,8 +200,7 @@ def launch_ui():
         ],
         title="🧠 Global MedAssist – AI Agent Simulation",
         description="Multi-agent healthcare scenario with PDF + MP3 export, emotional TTS, and RAG."
-    ).launch(share=False, server_name="0.0.0.0", server_port=7860)
+    ).launch(share=False)
 
 # Launch
 launch_ui()
-
