@@ -1,0 +1,9 @@
+gradio
+pydub
+reportlab
+google-cloud-texttospeech
+langchain
+langchain-core
+langchain-openai
+langgraph
+faiss-cpu
