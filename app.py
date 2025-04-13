@@ -3,6 +3,7 @@
 from pathlib import Path
 from pydub import AudioSegment
 from google.cloud import texttospeech
+from google.oauth2 import service_account
 from langgraph.graph import StateGraph
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -12,7 +13,7 @@ from langchain.chains import RetrievalQA
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import gradio as gr
-import os, random, datetime
+import os, random, datetime, json
 
 # ----------------------------
 # Patients
@@ -42,15 +43,21 @@ agent_emotions = {
 }
 
 # ----------------------------
-# Environment setup (HF-compatible paths)
+# Environment setup
 # ----------------------------
 audio_dir = Path("tts_audio"); audio_dir.mkdir(exist_ok=True, parents=True)
 log_file = Path("case_log.txt")
 zip_output = Path("case_export.zip")
 ambient_map = {"hospital": "ambient_hospital.mp3", "airport": "ambient_airport.mp3"}
 
-# TTS
-tts_client = texttospeech.TextToSpeechClient()
+# Load Google credentials from Hugging Face secret
+gcp_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if not gcp_creds:
+    raise RuntimeError("❌ GOOGLE_APPLICATION_CREDENTIALS_JSON secret not found. Add it in HF Space Settings.")
+
+creds_dict = json.loads(gcp_creds)
+credentials = service_account.Credentials.from_service_account_info(creds_dict)
+tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
 
 # ----------------------------
 # TTS Synthesis
