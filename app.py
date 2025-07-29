@@ -14,7 +14,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import gradio as gr
 import os, random, datetime, json
-
+from langchain_community.embeddings import HuggingFaceEmbeddings
 # ----------------------------
 # Patients
 # ----------------------------
@@ -71,7 +71,8 @@ tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
 # -------------------------------
 # Initialize OpenAI Embeddings
 # -------------------------------
-embeddings = OpenAIEmbeddings(openai_api_key=openai_key)
+# embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+# vector = FAISS.from_documents(chunks, embeddings)
 
 # ----------------------------
 # TTS Synthesis
@@ -103,8 +104,12 @@ def synthesize_speech(text, agent, emotion, context, lang="en"):
 # RAG Setup
 # ----------------------------
 Path("rag_docs").mkdir(exist_ok=True, parents=True)
-Path("rag_docs/hospital_data.txt").write_text("Hospital Pasteur is a Level 1 trauma center in Nice, France. ICU facilities included.")
-Path("rag_docs/policy_terms.txt").write_text("Standard policy covers emergencies with repatriation and escort.")
+Path("rag_docs/hospital_data.txt").write_text(
+    "Hospital Pasteur is a Level 1 trauma center in Nice, France. ICU facilities included."
+)
+Path("rag_docs/policy_terms.txt").write_text(
+    "Standard policy covers emergencies with repatriation and escort."
+)
 
 def create_rag_chain(file):
     # Load and split documents
@@ -112,16 +117,18 @@ def create_rag_chain(file):
     docs = loader.load()
     chunks = CharacterTextSplitter(chunk_size=300, chunk_overlap=50).split_documents(docs)
 
-    # Use Medassist key for OpenAI embeddings and LLM
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_key)
+    # Use Hugging Face embeddings for free (avoids OpenAI quota)
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vector = FAISS.from_documents(chunks, embeddings)
 
+    # Use Medassist key for ChatOpenAI only
     llm = ChatOpenAI(temperature=0, openai_api_key=openai_key)
     return RetrievalQA.from_chain_type(llm=llm, retriever=vector.as_retriever())
 
 # Initialize RAG chains
 rag_hospital = create_rag_chain("rag_docs/hospital_data.txt")
 rag_policy = create_rag_chain("rag_docs/policy_terms.txt")
+
 
 # ----------------------------
 # LangGraph Flow
