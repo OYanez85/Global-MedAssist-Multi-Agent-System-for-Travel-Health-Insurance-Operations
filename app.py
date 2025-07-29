@@ -53,24 +53,17 @@ ambient_map = {"hospital": "ambient_hospital.mp3", "airport": "ambient_airport.m
 # Load secrets from Hugging Face
 # -------------------------------
 
-# Google Credentials
+# Load Google credentials from Hugging Face secret
 gcp_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if not gcp_creds:
     raise RuntimeError("❌ GOOGLE_APPLICATION_CREDENTIALS_JSON secret not found. Add it in HF Space Settings.")
 
-# Medassist Key (your custom key)
-medassist_key = os.getenv("Medassist")
-if not medassist_key:
+# Load OpenAI/Medassist key from Hugging Face secret
+openai_key = os.getenv("Medassist")
+if not openai_key:
     raise RuntimeError("❌ Medassist secret not found. Add it in HF Space Settings.")
 
-# OpenAI API Key for embeddings
-openai_key = os.getenv("OPENAI_API_KEY")
-if not openai_key:
-    raise RuntimeError("❌ OPENAI_API_KEY secret not found. Add it in HF Space Settings.")
-
-# -------------------------------
-# Initialize Google TTS
-# -------------------------------
+# Convert Google JSON to credentials
 creds_dict = json.loads(gcp_creds)
 credentials = service_account.Credentials.from_service_account_info(creds_dict)
 tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
@@ -114,17 +107,19 @@ Path("rag_docs/hospital_data.txt").write_text("Hospital Pasteur is a Level 1 tra
 Path("rag_docs/policy_terms.txt").write_text("Standard policy covers emergencies with repatriation and escort.")
 
 def create_rag_chain(file):
-    loader     = TextLoader(file)
-    docs       = loader.load()
-    chunks     = CharacterTextSplitter(chunk_size=300, chunk_overlap=50).split_documents(docs)
+    # Load and split documents
+    loader = TextLoader(file)
+    docs = loader.load()
+    chunks = CharacterTextSplitter(chunk_size=300, chunk_overlap=50).split_documents(docs)
 
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    vector     = FAISS.from_documents(chunks, embeddings)
+    # Use Medassist key for OpenAI embeddings and LLM
+    embeddings = OpenAIEmbeddings(openai_api_key=openai_key)
+    vector = FAISS.from_documents(chunks, embeddings)
 
-    llm        = ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY)
+    llm = ChatOpenAI(temperature=0, openai_api_key=openai_key)
     return RetrievalQA.from_chain_type(llm=llm, retriever=vector.as_retriever())
 
-
+# Initialize RAG chains
 rag_hospital = create_rag_chain("rag_docs/hospital_data.txt")
 rag_policy = create_rag_chain("rag_docs/policy_terms.txt")
 
