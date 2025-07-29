@@ -198,6 +198,8 @@ def run_simulation_ui(patient_name):
     state = build_workflow().invoke({"patient": patient, "script": script, "log": [], "audio": []})
     pdf_path = audio_dir / f"{patient_name}_conversation.pdf"
     generate_pdf_from_log(state["log"], pdf_path)
+    # ✅ Save plain text log for ZIP export
+    log_file.write_text("\n".join(state["log"]))
 
     full_audio = audio_dir / f"{patient_name}_full_convo.mp3"
     combined = AudioSegment.empty()
