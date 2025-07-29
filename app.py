@@ -50,18 +50,35 @@ log_file = Path("case_log.txt")
 zip_output = Path("case_export.zip")
 ambient_map = {"hospital": "ambient_hospital.mp3", "airport": "ambient_airport.mp3"}
 
-# Load Google credentials from Hugging Face secret
+# Load secrets from Hugging Face
+# -------------------------------
+
+# Google Credentials
 gcp_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if not gcp_creds:
     raise RuntimeError("❌ GOOGLE_APPLICATION_CREDENTIALS_JSON secret not found. Add it in HF Space Settings.")
-# --- add this right after you load GOOGLE_APPLICATION_CREDENTIALS_JSON and credentials ---
-openai_key = os.getenv("Medassist")
-if not openai_key:
+
+# Medassist Key (your custom key)
+medassist_key = os.getenv("Medassist")
+if not medassist_key:
     raise RuntimeError("❌ Medassist secret not found. Add it in HF Space Settings.")
 
+# OpenAI API Key for embeddings
+openai_key = os.getenv("OPENAI_API_KEY")
+if not openai_key:
+    raise RuntimeError("❌ OPENAI_API_KEY secret not found. Add it in HF Space Settings.")
+
+# -------------------------------
+# Initialize Google TTS
+# -------------------------------
 creds_dict = json.loads(gcp_creds)
 credentials = service_account.Credentials.from_service_account_info(creds_dict)
 tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
+
+# -------------------------------
+# Initialize OpenAI Embeddings
+# -------------------------------
+embeddings = OpenAIEmbeddings(openai_api_key=openai_key)
 
 # ----------------------------
 # TTS Synthesis
