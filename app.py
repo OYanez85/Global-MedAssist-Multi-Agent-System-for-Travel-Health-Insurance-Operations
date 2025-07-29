@@ -15,7 +15,15 @@ from reportlab.pdfgen import canvas
 import gradio as gr
 import os, random, datetime, json
 from langchain_huggingface import HuggingFaceEmbeddings
+from pydantic import BaseModel
+from typing import List
+from langgraph.graph import StateGraph
 # ----------------------------
+class AgentState(BaseModel):
+    patient: Dict
+    script: Dict
+    log: List[str]
+    audio: List[str]
 # Patients
 # ----------------------------
 def get_patient_by_name(name):
@@ -149,7 +157,7 @@ def agent_node(agent_name):
     return run
 
 def build_workflow():
-    graph = StateGraph()
+    graph = StateGraph(state_schema=AgentState)
     nodes = [
         "ClientAgent", "ClientInteractionAgent", "TriageMedicalAssessmentAgent",
         "ProviderNetworkAgent", "PolicyValidationAgent", "MedicalDocumentationAgent",
