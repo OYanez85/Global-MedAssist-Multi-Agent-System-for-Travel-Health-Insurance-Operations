@@ -54,6 +54,10 @@ ambient_map = {"hospital": "ambient_hospital.mp3", "airport": "ambient_airport.m
 gcp_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if not gcp_creds:
     raise RuntimeError("❌ GOOGLE_APPLICATION_CREDENTIALS_JSON secret not found. Add it in HF Space Settings.")
+# --- add this right after you load GOOGLE_APPLICATION_CREDENTIALS_JSON and credentials ---
+openai_key = os.getenv("Medassist")
+if not openai_key:
+    raise RuntimeError("❌ Medassist secret not found. Add it in HF Space Settings.")
 
 creds_dict = json.loads(gcp_creds)
 credentials = service_account.Credentials.from_service_account_info(creds_dict)
@@ -93,11 +97,16 @@ Path("rag_docs/hospital_data.txt").write_text("Hospital Pasteur is a Level 1 tra
 Path("rag_docs/policy_terms.txt").write_text("Standard policy covers emergencies with repatriation and escort.")
 
 def create_rag_chain(file):
-    loader = TextLoader(file)
-    docs = loader.load()
-    chunks = CharacterTextSplitter(chunk_size=300, chunk_overlap=50).split_documents(docs)
-    vector = FAISS.from_documents(chunks, OpenAIEmbeddings())
-    return RetrievalQA.from_chain_type(llm=ChatOpenAI(temperature=0), retriever=vector.as_retriever())
+    loader     = TextLoader(file)
+    docs       = loader.load()
+    chunks     = CharacterTextSplitter(chunk_size=300, chunk_overlap=50).split_documents(docs)
+
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    vector     = FAISS.from_documents(chunks, embeddings)
+
+    llm        = ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY)
+    return RetrievalQA.from_chain_type(llm=llm, retriever=vector.as_retriever())
+
 
 rag_hospital = create_rag_chain("rag_docs/hospital_data.txt")
 rag_policy = create_rag_chain("rag_docs/policy_terms.txt")
