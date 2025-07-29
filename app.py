@@ -142,19 +142,42 @@ rag_policy = create_rag_chain("rag_docs/policy_terms.txt")
 # LangGraph Flow
 # ----------------------------
 def agent_node(agent_name):
-    def run(state):
+    def run(state: AgentState) -> AgentState:
+        # 1) pick emotion & context exactly as before
         emotion = agent_emotions.get(agent_name, "neutral")
-        context = "hospital" if "Hospital" in agent_name else "airport" if "Repatriation" in agent_name else "none"
-        msg = state["script"].get(agent_name, f"{agent_name} is processing...")
+        context = (
+            "hospital"
+            if "Hospital" in agent_name
+            else "airport"
+            if "Repatriation" in agent_name
+            else "none"
+        )
+
+        # 2) grab your script line via attribute, not dict
+        msg = state.script.get(agent_name, f"{agent_name} is processing...")
+
+        # 3) any RAG overrides
         if agent_name == "ProviderNetworkAgent":
             msg = rag_hospital.run("What care level does Hospital Pasteur provide?")
         elif agent_name == "PolicyValidationAgent":
             msg = rag_policy.run("Is repatriation with escort covered?")
-        audio = synthesize_speech(msg, agent=agent_name, emotion=emotion, context=context, lang=state["patient"]["lang"])
-        state["log"].append(f"{agent_name}: {msg}")
-        state["audio"].append(audio)
+
+        # 4) synthesize speech
+        audio = synthesize_speech(
+            msg,
+            agent=agent_name,
+            emotion=emotion,
+            context=context
+        )
+
+        # 5) append to the state lists
+        state.log.append(f"{agent_name}: {msg}")
+        state.audio.append(audio)
+
         return state
+
     return run
+
     
  def agent_node(agent_name):
     def run(state: AgentState) -> AgentState:
