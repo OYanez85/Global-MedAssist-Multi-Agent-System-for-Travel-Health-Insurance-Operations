@@ -16,7 +16,7 @@ import gradio as gr
 import os, random, datetime, json
 from langchain_huggingface import HuggingFaceEmbeddings
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict
 from langgraph.graph import StateGraph
 # ----------------------------
 class AgentState(BaseModel):
