@@ -20,8 +20,8 @@ from typing import List, Dict
 from langgraph.graph import StateGraph
 # ----------------------------
 class AgentState(BaseModel):
-    patient: Dict
-    script: Dict
+    patient: Dict[str, str]
+    script: Dict[str, str]
     log: List[str]
     audio: List[str]
 # Patients
@@ -155,19 +155,35 @@ def agent_node(agent_name):
         state["audio"].append(audio)
         return state
     return run
-
+    
+# Node: Patients
+def Patients(state: AgentState):
+    state.log.append(f"Patient selected: {state.patient['name']}")
+    return state
+    
 def build_workflow():
-    graph = StateGraph(state_schema=AgentState)
+    graph = StateGraph(AgentState)
+
     nodes = [
-        "ClientAgent", "ClientInteractionAgent", "TriageMedicalAssessmentAgent",
+        "Patients", "ClientAgent", "ClientInteractionAgent", "TriageMedicalAssessmentAgent",
         "ProviderNetworkAgent", "PolicyValidationAgent", "MedicalDocumentationAgent",
         "RepatriationPlannerAgent", "MedicalDecisionAgent", "ComplianceConsentAgent", "OrchestratorAgent"
     ]
-    for node in nodes: graph.add_node(node, agent_node(node))
-    for i in range(len(nodes) - 1): graph.set_edge(nodes[i], nodes[i + 1])
+
+    # Define each node with your existing agent_node function
+    for node in nodes:
+        def node_func(state: AgentState, node_name=node):
+            return agent_node(node_name)(state)
+        graph.add_node(node, node_func)
+
+    # Set edges between nodes
+    for i in range(len(nodes) - 1):
+        graph.add_edge(nodes[i], nodes[i + 1])
+
     graph.set_entry_point("ClientAgent")
     graph.set_finish_point("OrchestratorAgent")
     return graph.compile()
+
 
 # ----------------------------
 # Generate PDF
