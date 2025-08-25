@@ -1,282 +1,330 @@
 # app.py
 
+import os
+import io
+import random
+import json
+import datetime
 from pathlib import Path
+from zipfile import ZipFile
+
+import gradio as gr
 from pydub import AudioSegment
+from gtts import gTTS
 from google.cloud import texttospeech
-from google.oauth2 import service_account
-from langgraph.graph import StateGraph
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+
+# ✅ NEW LangChain imports (post-2024 split)
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import TextLoader
-from langchain.text_splitter import CharacterTextSplitter
+from langchain_text_splitters import CharacterTextSplitter
 from langchain.chains import RetrievalQA
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import gradio as gr
-import os, random, datetime, json
-from langchain_huggingface import HuggingFaceEmbeddings
-from pydantic import BaseModel
-from typing import List, Dict
+
 from langgraph.graph import StateGraph
-# ----------------------------
-class AgentState(BaseModel):
-    patient: Dict[str, str]
-    script: Dict[str, str]
-    log: List[str]
-    audio: List[str]
-# Patients
-# ----------------------------
+from typing import TypedDict, List
+
+# ----------------------------------------
+# 🔐 OpenAI API key
+# ----------------------------------------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY environment variable is not set.")
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+
+# ----------------------------------------
+# 🔐 Google TTS credentials (Space secret: GOOGLE_CLOUD_TTS_JSON)
+# ----------------------------------------
+def init_google_tts_client():
+    try:
+        sa_json = os.getenv("GOOGLE_CLOUD_TTS_JSON")
+        if sa_json:
+            import tempfile
+            fd, path = tempfile.mkstemp(suffix=".json")
+            with os.fdopen(fd, "w") as f:
+                f.write(sa_json)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+        return texttospeech.TextToSpeechClient()
+    except Exception:
+        return None
+
+tts_client = init_google_tts_client()
+
+# ----------------------------------------
+# 👥 Patients
+# ----------------------------------------
 def get_patient_by_name(name):
     patients = {
-        "anne": {"name": "Anne", "location": "Nice, France", "symptoms": "severe leg pain", "urgency": "emergency", "lang": "fr"},
-        "liam": {"name": "Liam", "location": "Da Nang, Vietnam", "symptoms": "fever and dizziness", "urgency": "outpatient", "lang": "en"},
-        "priya": {"name": "Priya", "location": "Doha Airport, Qatar", "symptoms": "abdominal pain", "urgency": "emergency", "lang": "en"}
+        "anne": {"name": "Anne",   "location": "Nice, France",    "symptoms": "severe leg pain after a fall", "urgency": "emergency"},
+        "liam": {"name": "Liam",   "location": "Da Nang, Vietnam", "symptoms": "high fever and dizziness",     "urgency": "outpatient"},
+        "priya": {"name": "Priya", "location": "Doha Airport, Qatar", "symptoms": "abdominal pain",           "urgency": "emergency"},
     }
     return patients.get(name.lower())
 
-# ----------------------------
-# Emotion presets
-# ----------------------------
+# ----------------------------------------
+# 🎭 Emotion presets
+# ----------------------------------------
 agent_emotions = {
-    "ClientAgent": "stress",
-    "ClientInteractionAgent": "calm",
-    "TriageMedicalAssessmentAgent": "urgent",
-    "ProviderNetworkAgent": "neutral",
-    "PolicyValidationAgent": "neutral",
-    "MedicalDocumentationAgent": "calm",
-    "RepatriationPlannerAgent": "calm",
-    "MedicalDecisionAgent": "calm",
-    "ComplianceConsentAgent": "neutral",
-    "OrchestratorAgent": "calm"
+    "ClientAgent": "stress", "ClientAgent_2": "stress", "ClientAgent_3": "concerned", "ClientAgent_4": "curious",
+    "ClientAgent_5": "in_pain", "ClientAgent_6": "grateful", "ClientInteractionAgent": "calm",
+    "TriageMedicalAssessmentAgent": "urgent", "ProviderNetworkAgent": "neutral",
+    "PolicyValidationAgent": "neutral", "MedicalDocumentationAgent": "calm",
+    "RepatriationPlannerAgent": "calm", "MedicalDecisionAgent": "calm",
+    "ComplianceConsentAgent": "neutral", "CountryCareLevelAgent": "neutral",
+    "OrchestratorAgent": "calm",
 }
 
-# ----------------------------
-# Environment setup
-# ----------------------------
-audio_dir = Path("tts_audio"); audio_dir.mkdir(exist_ok=True, parents=True)
+audio_dir = Path("tts_audio"); audio_dir.mkdir(exist_ok=True)
 log_file = Path("case_log.txt")
 zip_output = Path("case_export.zip")
-ambient_map = {"hospital": "ambient_hospital.mp3", "airport": "ambient_airport.mp3"}
 
-# Load secrets from Hugging Face
-# -------------------------------
+# Optional ringtone
+ringtone_path = Path("sounds/ringtone.mp3")
+ringtone = AudioSegment.from_file(ringtone_path)[:5000] if ringtone_path.exists() else AudioSegment.silent(duration=5000)
 
-# Load Google credentials from Hugging Face secret
-gcp_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-if not gcp_creds:
-    raise RuntimeError("❌ GOOGLE_APPLICATION_CREDENTIALS_JSON secret not found. Add it in HF Space Settings.")
+client_voices = {"liam": "en-GB-Standard-A", "anne": "en-GB-Wavenet-F", "priya": "en-GB-Wavenet-F"}
+agent_voice = "en-GB-Wavenet-D"
 
-# Load OpenAI/Medassist key from Hugging Face secret
-openai_key = os.getenv("Medassist")
-if not openai_key:
-    raise RuntimeError("❌ Medassist secret not found. Add it in HF Space Settings.")
+# ----------------------------------------
+# 🔈 TTS
+# ----------------------------------------
+def synthesize_speech(text, agent, emotion="neutral", context="none"):
+    pitch = "+2st" if emotion == "calm" else ("+0st" if emotion == "urgent" else "-2st")
+    rate = "slow" if emotion == "stress" else ("fast" if emotion == "urgent" else "medium")
+    has_ringtone = "📞" in text
+    clean_text = text.replace("📞", "").strip()
+    is_client = agent.startswith("ClientAgent")
 
-# Convert Google JSON to credentials
-creds_dict = json.loads(gcp_creds)
-credentials = service_account.Credentials.from_service_account_info(creds_dict)
-tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
+    # pick voice
+    voice_name = agent_voice if not is_client else client_voices.get(
+        next((n for n in client_voices if n in clean_text.lower()), "liam"),
+        "en-GB-Standard-A",
+    )
+    mp3_path = audio_dir / f"{agent}_{random.randint(1000,9999)}.mp3"
 
-# -------------------------------
-# Initialize OpenAI Embeddings
-# -------------------------------
-# embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-# vector = FAISS.from_documents(chunks, embeddings)
+try:
+    if tts_client:  # Google Cloud TTS
+        safe_text = escape(clean_text)  # escape &, <, >, " for SSML/XML
+        ssml = f'<speak><prosody rate="{rate}" pitch="{pitch}">{safe_text}</prosody></speak>'
+        input_text = texttospeech.SynthesisInput(ssml=ssml)
+        voice = texttospeech.VoiceSelectionParams(language_code="en-GB", name=voice_name)
+        audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
+        response = tts_client.synthesize_speech(
+            input=input_text, voice=voice, audio_config=audio_config
+        )
+        voice_audio = AudioSegment.from_file(io.BytesIO(response.audio_content), format="mp3")
+    else:  # gTTS fallback (requires internet)
+        tts = gTTS(text=clean_text, lang="en", slow=False)
+        temp = audio_dir / f"temp_{agent}.mp3"
+        tts.save(temp)
+        voice_audio = AudioSegment.from_file(temp)
+        try:
+            temp.unlink(missing_ok=True)  # ok on Python 3.8+
+        except TypeError:
+            # for older runtimes without missing_ok
+            if temp.exists():
+                temp.unlink()
 
-# ----------------------------
-# TTS Synthesis
-# ----------------------------
-def synthesize_speech(text, agent, emotion, context, lang="en"):
-    pitch = {"calm": "+2st", "stress": "-2st", "urgent": "+0st"}.get(emotion, "+0st")
-    rate = {"calm": "medium", "stress": "slow", "urgent": "fast"}.get(emotion, "medium")
-    ssml = f"""<speak><prosody rate='{rate}' pitch='{pitch}'>{text}</prosody></speak>"""
-
-    voice_code = "fr-FR-Wavenet-A" if lang == "fr" else "en-GB-Wavenet-A"
-    input_text = texttospeech.SynthesisInput(ssml=ssml)
-    voice = texttospeech.VoiceSelectionParams(language_code=voice_code, name=voice_code)
-    audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
-    response = tts_client.synthesize_speech(input=input_text, voice=voice, audio_config=audio_config)
-
-    mp3_path = audio_dir / f"{agent}_{random.randint(1000, 9999)}.mp3"
-    with open(mp3_path, "wb") as out: out.write(response.audio_content)
-
-    ambient_file = ambient_map.get(context)
-    if ambient_file and Path(ambient_file).exists():
-        voice = AudioSegment.from_file(mp3_path)
-        ambient = AudioSegment.from_file(ambient_file).apply_gain(-12)
-        mix = ambient.overlay(voice)
-        mix.export(mp3_path, format="mp3")
-
+    pause = AudioSegment.silent(duration=700)
+    final_audio = (ringtone + pause + voice_audio) if has_ringtone else voice_audio
+    final_audio.export(mp3_path, format="mp3")
     return str(mp3_path)
 
-# ----------------------------
-# RAG Setup
-# ----------------------------
-Path("rag_docs").mkdir(exist_ok=True, parents=True)
-Path("rag_docs/hospital_data.txt").write_text(
-    "Hospital Pasteur is a Level 1 trauma center in Nice, France. ICU facilities included."
-)
-Path("rag_docs/policy_terms.txt").write_text(
-    "Standard policy covers emergencies with repatriation and escort."
-)
+except Exception as e:
+    # Last-resort 1s silence (still produce a file to avoid Gradio error)
+    AudioSegment.silent(duration=1000).export(mp3_path, format="mp3")
+    return str(mp3_path)
 
+# ----------------------------------------
+# 🧠 Mock RAG
+# ----------------------------------------
 def create_rag_chain(file):
-    # Load and split documents
     loader = TextLoader(file)
     docs = loader.load()
     chunks = CharacterTextSplitter(chunk_size=300, chunk_overlap=50).split_documents(docs)
+    vector = FAISS.from_documents(chunks, OpenAIEmbeddings())
+    return RetrievalQA.from_chain_type(llm=ChatOpenAI(temperature=0), retriever=vector.as_retriever())
 
-    # Use Hugging Face embeddings for free (avoids OpenAI quota)
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    vector = FAISS.from_documents(chunks, embeddings)
+Path("rag_docs").mkdir(exist_ok=True)
+Path("rag_docs/hospital_data.txt").write_text(
+    "Hospital Pasteur is a Level 1 trauma center in Nice, France. It includes ICU facilities and is in-network."
+)
+Path("rag_docs/policy_terms.txt").write_text(
+    "Standard policy covers outpatient and emergency treatment, includes repatriation with escort in emergencies."
+)
 
-    # Use Medassist key for ChatOpenAI only
-    llm = ChatOpenAI(temperature=0, openai_api_key=openai_key)
-    return RetrievalQA.from_chain_type(llm=llm, retriever=vector.as_retriever())
+# ----------------------------------------
+# 🔗 LangGraph
+# ----------------------------------------
+class AgentState(TypedDict):
+    patient: dict
+    script: dict
+    log: List[str]
+    audio: List[str]
 
-# Initialize RAG chains
-rag_hospital = create_rag_chain("rag_docs/hospital_data.txt")
-rag_policy = create_rag_chain("rag_docs/policy_terms.txt")
-
-
-# ----------------------------
-# LangGraph Flow
-# ----------------------------
 def agent_node(agent_name):
     def run(state: AgentState) -> AgentState:
-        # 1) pick emotion & context
         emotion = agent_emotions.get(agent_name, "neutral")
-        context = (
-            "hospital"
-            if "Hospital" in agent_name
-            else "airport"
-            if "Repatriation" in agent_name
-            else "none"
-        )
+        context = "hospital" if "Hospital" in agent_name else "airport" if "Repatriation" in agent_name else "none"
+        msg = state["script"].get(agent_name, f"{agent_name} is processing...")
 
-        # 2) grab your script line via attribute
-        msg = state.script.get(agent_name, f"{agent_name} is processing...")
+        if agent_name == "ProviderNetworkAgent" and rag_hospital:
+            try:
+                msg = rag_hospital.run("What care level does Hospital Pasteur provide?")
+            except Exception:
+                pass
+        if agent_name == "PolicyValidationAgent" and rag_policy:
+            try:
+                msg = rag_policy.run("Is repatriation with escort covered?")
+            except Exception:
+                pass
 
-        # 3) any RAG overrides
-        if agent_name == "ProviderNetworkAgent":
-            msg = rag_hospital.run("What care level does Hospital Pasteur provide?")
-        elif agent_name == "PolicyValidationAgent":
-            msg = rag_policy.run("Is repatriation with escort covered?")
-
-        # 4) synthesize speech
-        audio = synthesize_speech(
-            msg,
-            agent=agent_name,
-            emotion=emotion,
-            context=context
-        )
-
-        # 5) append to the state lists
-        state.log.append(f"{agent_name}: {msg}")
-        state.audio.append(audio)
-
+        state["log"].append(f"{agent_name}: {msg}")
+        state["audio"].append(synthesize_speech(msg, agent_name, emotion, context))
         return state
-
     return run
 
-# Node: Patients
-def Patients(state: AgentState):
-    state.log.append(f"Patient selected: {state.patient['name']}")
-    return state
-    
 def build_workflow():
     graph = StateGraph(AgentState)
-
-    nodes = [
-        "Patients", "ClientAgent", "ClientInteractionAgent", "TriageMedicalAssessmentAgent",
-        "ProviderNetworkAgent", "PolicyValidationAgent", "MedicalDocumentationAgent",
-        "RepatriationPlannerAgent", "MedicalDecisionAgent", "ComplianceConsentAgent", "OrchestratorAgent"
+    for node in agent_emotions:
+        graph.add_node(node, agent_node(node))
+    edges = [
+        ("ClientAgent", "ClientInteractionAgent"),("ClientInteractionAgent","TriageMedicalAssessmentAgent"),
+        ("TriageMedicalAssessmentAgent","ClientAgent_2"),("ClientAgent_2","ProviderNetworkAgent"),
+        ("ProviderNetworkAgent","ClientAgent_3"),("ClientAgent_3","MedicalDocumentationAgent"),
+        ("MedicalDocumentationAgent","ClientAgent_4"),("ClientAgent_4","PolicyValidationAgent"),
+        ("PolicyValidationAgent","MedicalDecisionAgent"),("MedicalDecisionAgent","ClientAgent_5"),
+        ("ClientAgent_5","RepatriationPlannerAgent"),("RepatriationPlannerAgent","ComplianceConsentAgent"),
+        ("ComplianceConsentAgent","ClientAgent_6"),("ClientAgent_6","CountryCareLevelAgent"),
+        ("CountryCareLevelAgent","OrchestratorAgent")
     ]
-
-    # Define each node with your existing agent_node function
-    for node in nodes:
-        def node_func(state: AgentState, node_name=node):
-            return agent_node(node_name)(state)
-        graph.add_node(node, node_func)
-
-    # Set edges between nodes
-    for i in range(len(nodes) - 1):
-        graph.add_edge(nodes[i], nodes[i + 1])
-
+    for a, b in edges:
+        graph.add_edge(a, b)
     graph.set_entry_point("ClientAgent")
     graph.set_finish_point("OrchestratorAgent")
     return graph.compile()
 
+# ----------------------------------------
+# 🧩 Helpers: audio concat & PDF
+# ----------------------------------------
+def concatenate_audio(audio_paths, output_path):
+    combined = AudioSegment.empty()
+    for p in audio_paths:
+        combined += AudioSegment.from_file(p)
+    combined.export(output_path, format="mp3")
+    return output_path
 
-# ----------------------------
-# Generate PDF
-# ----------------------------
 def generate_pdf_from_log(log_lines, pdf_path):
     c = canvas.Canvas(str(pdf_path), pagesize=letter)
-    width, height = letter; y = height - 60
+    width, height = letter
     c.setFont("Helvetica", 10)
-    c.drawString(30, height - 40, f"Conversation Log – {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    c.drawString(30, height-40, f"Conversation Log - Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    y = height-60
     for line in log_lines:
-        if y < 40: c.showPage(); c.setFont("Helvetica", 10); y = height - 40
-        c.drawString(30, y, line); y -= 14
+        if y < 40:
+            c.showPage()
+            c.setFont("Helvetica", 10)
+            y = height-40
+        c.drawString(30, y, line[:110])  # wrap defensively
+        y -= 14
     c.save()
 
-# ----------------------------
-# Simulation
-# ----------------------------
+# ----------------------------------------
+# 🗣️ Minimal patient scripts (replace with yours)
+# ----------------------------------------
+patient_scripts = {
+    "Anne": {
+        "ClientAgent": "📞 Hello, this is Anne. I fell and I have severe leg pain.",
+        "ClientInteractionAgent": "Thank you Anne, I’ll collect a few details.",
+        "TriageMedicalAssessmentAgent": "Based on symptoms, an urgent assessment is recommended.",
+        "ClientAgent_2": "I understand. What should I do?",
+        "ProviderNetworkAgent": "Nearest in-network is Hospital Pasteur, Level 1 trauma center.",
+        "ClientAgent_3": "Okay, can you book me in?",
+        "MedicalDocumentationAgent": "We will log your medical history and consent.",
+        "ClientAgent_4": "Consent provided.",
+        "PolicyValidationAgent": "Your policy covers emergency treatment and escorted repatriation if needed.",
+        "MedicalDecisionAgent": "Decision: proceed to emergency department at Pasteur.",
+        "ClientAgent_5": "I’m heading there now.",
+        "RepatriationPlannerAgent": "Repatriation not required at this time.",
+        "ComplianceConsentAgent": "Consent stored and compliant.",
+        "ClientAgent_6": "Thank you.",
+        "CountryCareLevelAgent": "France care level is adequate.",
+        "OrchestratorAgent": "Case closed. Get well soon."
+    },
+    "Liam": {"ClientAgent": "Hi, I have high fever and dizziness."},
+    "Priya": {"ClientAgent": "I have abdominal pain at the airport."}
+}
+
+# ----------------------------------------
+# 🚀 Gradio UI
+# ----------------------------------------
 def run_simulation_ui(patient_name):
-    print(f"🚀 run_simulation_ui called with: {patient_name}")
     patient = get_patient_by_name(patient_name)
-    if not patient: return "❌ Patient not found.", None, None
-    if log_file.exists(): log_file.unlink()
-    for f in audio_dir.glob("*.mp3"): f.unlink()
+    if not patient:
+        return "❌ Patient not found.", None, None
+    script = patient_scripts.get(patient_name)
+    if not script:
+        return "❌ No script found for this patient.", None, None
 
-    script = {
-        "ClientAgent": f"📞 Hello? I had a fall in {patient['location']}. It hurts badly!",
-        "ClientInteractionAgent": f"Hello {patient['name']}, you're in {patient['location']} with '{patient['symptoms']}'. This is {patient['urgency']}.",
-        "TriageMedicalAssessmentAgent": "Ambulance arranged. Requesting medical report.",
-        "MedicalDocumentationAgent": f"Requesting Fit-to-Fly certificate for {patient['name']}.",
-        "RepatriationPlannerAgent": "Planning business class flight with nurse escort.",
-        "MedicalDecisionAgent": "✅ Case cleared.",
-        "ComplianceConsentAgent": f"🔐 {patient['name']} consented to share medical data.",
-        "OrchestratorAgent": "Case complete. Logs saved and KPIs triggered."
-    }
+    # Build RAG chains
+    global rag_hospital, rag_policy
+    rag_hospital = rag_policy = None
+    try:
+        rag_hospital = create_rag_chain("rag_docs/hospital_data.txt")
+        rag_policy   = create_rag_chain("rag_docs/policy_terms.txt")
+    except Exception as e:
+        return f"⚠️ Error building RAG indexes: {e}", None, None
 
-    state = build_workflow().invoke({"patient": patient, "script": script, "log": [], "audio": []})
-    pdf_path = audio_dir / f"{patient_name}_conversation.pdf"
-    generate_pdf_from_log(state["log"], pdf_path)
-    # ✅ Save plain text log for ZIP export
-    log_file.write_text("\n".join(state["log"]))
+    # Cleanup
+    for f in audio_dir.glob("*.mp3"):
+        try: f.unlink()
+        except: pass
+    if log_file.exists():
+        try: log_file.unlink()
+        except: pass
 
-    full_audio = audio_dir / f"{patient_name}_full_convo.mp3"
-    combined = AudioSegment.empty()
-    for a in state["audio"]: combined += AudioSegment.from_file(a)
-    combined.export(full_audio, format="mp3")
+    # Run graph
+    graph = build_workflow()
+    state = graph.invoke({
+        "patient": patient,
+        "script": script,
+        "log": [],
+        "audio": []
+    })
+
+    # Outputs
+    full_audio = audio_dir / f"{patient_name}_full.mp3"
+    pdf_file   = audio_dir / f"{patient_name}_log.pdf"
+    concatenate_audio(state["audio"], full_audio)
+    generate_pdf_from_log(state["log"], pdf_file)
 
     with zip_output.open("wb") as f:
-        from zipfile import ZipFile
-        with ZipFile(f, "w") as zipf:
-            for a in state["audio"]: zipf.write(a, arcname=os.path.basename(a))
-            zipf.write(log_file, arcname=log_file.name)
-            zipf.write(pdf_path, arcname=pdf_path.name)
-            zipf.write(full_audio, arcname=full_audio.name)
+        with ZipFile(f, "w") as z:
+            for a in state["audio"]:
+                z.write(a, arcname=Path(a).name)
+            log_file.write_text("\n".join(state["log"]))
+            z.write(log_file, arcname=log_file.name)
+            z.write(pdf_file, arcname=pdf_file.name)
+            z.write(full_audio, arcname=full_audio.name)
 
     return "\n".join(state["log"]), str(zip_output), str(full_audio)
 
-# ----------------------------
-# Gradio UI
-# ----------------------------
 def launch_ui():
-    gr.Interface(
+    demo = gr.Interface(
         fn=run_simulation_ui,
-        inputs=gr.Dropdown(choices=["Anne", "Liam", "Priya"], label="Select Patient"),
+        inputs=gr.Dropdown(choices=["Anne","Liam","Priya"], label="Select Patient", value="Anne"),
         outputs=[
             gr.Textbox(label="Conversation Log"),
-            gr.File(label="Download ZIP (Log + MP3 + PDF)"),
-            gr.Audio(label="Stream Full Conversation", type="filepath", show_download_button=True)
+            gr.File(label="Download ZIP"),
+            gr.Audio(label="Full Conversation", type="filepath")
         ],
-        title="🧠 Global MedAssist – AI Agent Simulation",
-        description="Multi-agent healthcare scenario with PDF + MP3 export, emotional TTS, and RAG."
-    ).launch(share=False)
+        title="🧠 Global MedAssist",
+        description="Multi-agent simulation with TTS, RAG, PDF export"
+    )
+    # queue() helps under load
+    demo.queue().launch(server_name="0.0.0.0", server_port=int(os.getenv("PORT", 7860)))
 
-# Launch
-launch_ui()
+if __name__ == "__main__":
+    launch_ui()
+
